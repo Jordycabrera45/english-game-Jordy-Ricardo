@@ -662,8 +662,16 @@ def score_to_10(correct, total):
     return round((correct / total) * 10, 1)
 
 
+def clear_answer_state(items):
+    """Elimina del session_state las respuestas previamente ingresadas para estos
+    ejercicios, para que el segundo intento se conteste desde cero."""
+    for item in items:
+        st.session_state.pop(f"ans_{item['id']}", None)
+
+
 def submit_exam():
-    """Recolecta las respuestas del formulario, calcula el puntaje y guarda la entrega."""
+    """Recolecta las respuestas del formulario, calcula el puntaje y guarda la entrega.
+    Solo el intento 2/2 se envía al panel de la profesora; el intento 1/2 es de práctica."""
     items = st.session_state.exam_items
     details = []
     correct_count = 0
@@ -686,11 +694,13 @@ def submit_exam():
     score = score_to_10(correct_count, total)
     elapsed = time.time() - st.session_state.exam_start_time
     duration_label = "15 min (Corto)" if st.session_state.exam_mode == "short" else "30 min (Largo)"
+    attempt = st.session_state.get("exam_attempt", 1)
 
     submission = {
         "Nombre": st.session_state.student_name,
         "Unidad": UNIT_NAMES.get(st.session_state.exam_unit, st.session_state.exam_unit),
         "Modalidad": duration_label,
+        "Intento": f"{attempt}/2",
         "Tiempo empleado": format_time(elapsed),
         "Puntaje (0-10)": score,
         "Ejercicios correctos": f"{correct_count}/{total}",
@@ -698,8 +708,10 @@ def submit_exam():
         "detalle": details,
     }
 
-    with shared_store["lock"]:
-        shared_store["submissions"].append(submission)
+    # Solo se registra en el panel de la profesora al completar el segundo intento.
+    if attempt >= 2:
+        with shared_store["lock"]:
+            shared_store["submissions"].append(submission)
 
     st.session_state.last_result = submission
     st.session_state.exam_active = False
@@ -715,6 +727,8 @@ if "exam_finished" not in st.session_state:
     st.session_state.exam_finished = False
 if "time_up" not in st.session_state:
     st.session_state.time_up = False
+if "exam_attempt" not in st.session_state:
+    st.session_state.exam_attempt = 1
 
 # ------------------------------------------------------------------------------
 # SIDEBAR - SELECCIÓN DE MODO
@@ -723,6 +737,7 @@ st.sidebar.title("📚 English Practice")
 app_mode = st.sidebar.radio("Selecciona tu rol:", ["Estudiante", "Profesora"])
 st.sidebar.markdown("---")
 st.sidebar.caption("App de práctica A2-B1 · 10 unidades · Streamlit")
+st.sidebar.caption("Cada examen se repite 2 veces: el 1er intento es práctica y el 2do se envía a la teacher.")
 
 # ==============================================================================
 # MODO ESTUDIANTE
@@ -733,7 +748,17 @@ if app_mode == "Estudiante":
     # -------- Si terminó el examen y aún no reinicia --------
     if st.session_state.exam_finished and st.session_state.get("last_result"):
         result = st.session_state.last_result
-        st.success(f"¡Enviado a la teacher! Puntaje: **{result['Puntaje (0-10)']} / 10**")
+        attempt = st.session_state.get("exam_attempt", 1)
+
+        if attempt < 2:
+            st.warning(
+                f"✏️ Intento 1/2 (práctica) completado. Puntaje: **{result['Puntaje (0-10)']} / 10**. "
+                "Este resultado NO se envía a la teacher todavía. Repite los mismos ejercicios para "
+                "registrar tu resultado final."
+            )
+        else:
+            st.success(f"¡Enviado a la teacher! (Intento 2/2) Puntaje: **{result['Puntaje (0-10)']} / 10**")
+
         col1, col2, col3 = st.columns(3)
         col1.metric("Puntaje", f"{result['Puntaje (0-10)']}/10")
         col2.metric("Correctas", result["Ejercicios correctos"])
@@ -747,12 +772,25 @@ if app_mode == "Estudiante":
                 st.write(f"**Respuesta correcta:** {d['respuesta_correcta']}")
                 st.info(f"💡 Retroalimentación (A2 → B1): {d['explicacion']}")
 
-        if st.button("🔄 Realizar otro examen"):
-            st.session_state.exam_finished = False
-            st.session_state.exam_active = False
-            st.session_state.time_up = False
-            st.session_state.pop("last_result", None)
-            st.rerun()
+        if attempt < 2:
+            if st.button("🔁 Repetir estos mismos ejercicios (Intento 2/2 - se enviará a la teacher)",
+                         use_container_width=True):
+                clear_answer_state(st.session_state.exam_items)
+                st.session_state.exam_attempt = 2
+                st.session_state.exam_start_time = time.time()
+                st.session_state.exam_active = True
+                st.session_state.exam_finished = False
+                st.session_state.time_up = False
+                st.session_state.pop("last_result", None)
+                st.rerun()
+        else:
+            if st.button("🔄 Realizar otro examen (ejercicios nuevos)", use_container_width=True):
+                st.session_state.exam_finished = False
+                st.session_state.exam_active = False
+                st.session_state.time_up = False
+                st.session_state.exam_attempt = 1
+                st.session_state.pop("last_result", None)
+                st.rerun()
 
     # -------- Si el examen está activo (en curso) --------
     elif st.session_state.exam_active:
@@ -761,8 +799,13 @@ if app_mode == "Estudiante":
             submit_exam()
             st.rerun()
 
+        attempt = st.session_state.get("exam_attempt", 1)
         st.subheader(f"Examen: {UNIT_NAMES.get(st.session_state.exam_unit)}")
-        st.caption(f"Estudiante: {st.session_state.student_name}")
+        st.caption(f"Estudiante: {st.session_state.student_name} · Intento {attempt}/2")
+        if attempt < 2:
+            st.caption("🔎 Este es tu intento de práctica (1/2). Al terminar podrás repetirlo para enviarlo a la teacher.")
+        else:
+            st.caption("📤 Este es tu intento final (2/2). Al enviarlo, se registrará en el panel de la teacher.")
 
         # --- Temporizador (fragmento que se auto-actualiza cada segundo) ---
         @st.fragment(run_every=1)
@@ -818,7 +861,8 @@ if app_mode == "Estudiante":
 
                 st.markdown("---")
 
-            submitted = st.form_submit_button("📤 Enviar a la Teacher", use_container_width=True)
+            btn_label = "📤 Enviar (Intento 2/2 → va a la Teacher)" if attempt >= 2 else "➡️ Terminar Intento 1/2 (práctica)"
+            submitted = st.form_submit_button(btn_label, use_container_width=True)
             if submitted:
                 submit_exam()
                 st.rerun()
@@ -826,6 +870,8 @@ if app_mode == "Estudiante":
     # -------- Formulario de registro / configuración --------
     else:
         st.write("Completa tus datos para comenzar la práctica.")
+        st.caption("ℹ️ Harás cada examen 2 veces con los mismos ejercicios: el intento 1 es práctica y "
+                   "solo el intento 2 se envía a la teacher.")
         with st.form(key="setup_form"):
             name = st.text_input("Nombre y Apellido del Estudiante")
             unit = st.selectbox(
@@ -838,7 +884,7 @@ if app_mode == "Estudiante":
                 options=["Examen Corto - 15 minutos (10 ejercicios)",
                          "Examen Largo / Lectura - 30 minutos (hasta 20 ejercicios)"],
             )
-            start = st.form_submit_button("▶️ Comenzar examen", use_container_width=True)
+            start = st.form_submit_button("▶️ Comenzar examen (Intento 1/2)", use_container_width=True)
 
             if start:
                 if not name.strip():
@@ -858,6 +904,7 @@ if app_mode == "Estudiante":
                         st.session_state.exam_active = True
                         st.session_state.exam_finished = False
                         st.session_state.time_up = False
+                        st.session_state.exam_attempt = 1
                         st.rerun()
 
 # ==============================================================================
@@ -887,6 +934,7 @@ else:
                 st.rerun()
         with refresh_col2:
             st.caption("Los resultados de todos los alumnos (cualquier celular/PC) llegan aquí en tiempo real. "
+                       "Solo se muestra el intento final (2/2) de cada examen. "
                        "Usa 'Actualizar' si un alumno acaba de enviar y no ves su fila todavía.")
 
         if not subs:
@@ -897,6 +945,7 @@ else:
                     "Nombre": s["Nombre"],
                     "Unidad": s["Unidad"],
                     "Modalidad": s["Modalidad"],
+                    "Intento": s.get("Intento", "2/2"),
                     "Tiempo empleado": s["Tiempo empleado"],
                     "Puntaje (0-10)": s["Puntaje (0-10)"],
                     "Correctas": s["Ejercicios correctos"],
