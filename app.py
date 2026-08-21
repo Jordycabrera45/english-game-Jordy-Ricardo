@@ -18,6 +18,7 @@ import random
 import re
 import time
 import io
+import threading
 from datetime import datetime
 import pandas as pd
 
@@ -565,6 +566,25 @@ READINGS = [
 TF_OPTIONS = ["True", "False", "Not Mentioned"]
 
 # ------------------------------------------------------------------------------
+# ALMACÉN COMPARTIDO ENTRE SESIONES (IMPORTANTE)
+# ------------------------------------------------------------------------------
+# st.session_state es INDIVIDUAL por cada navegador/pestaña: si cada alumno
+# abre la app desde su celular, su session_state es solo suyo y NUNCA llega
+# a la sesión de la profesora. Para que los resultados se vean "en tiempo
+# real" en el panel de la profesora, deben guardarse en un almacén
+# COMPARTIDO por todas las sesiones que usan la misma app en el servidor.
+# @st.cache_resource crea justo eso: un único objeto en memoria compartido
+# por todos los usuarios mientras la app siga corriendo (se reinicia si la
+# app se reinicia/duerme por inactividad en Streamlit Cloud).
+# ------------------------------------------------------------------------------
+@st.cache_resource
+def get_shared_store():
+    return {"submissions": [], "lock": threading.Lock()}
+
+
+shared_store = get_shared_store()
+
+# ------------------------------------------------------------------------------
 # FUNCIONES AUXILIARES
 # ------------------------------------------------------------------------------
 
@@ -678,9 +698,8 @@ def submit_exam():
         "detalle": details,
     }
 
-    if "submissions" not in st.session_state:
-        st.session_state.submissions = []
-    st.session_state.submissions.append(submission)
+    with shared_store["lock"]:
+        shared_store["submissions"].append(submission)
 
     st.session_state.last_result = submission
     st.session_state.exam_active = False
@@ -690,8 +709,6 @@ def submit_exam():
 # ------------------------------------------------------------------------------
 # INICIALIZACIÓN DE SESSION STATE
 # ------------------------------------------------------------------------------
-if "submissions" not in st.session_state:
-    st.session_state.submissions = []
 if "exam_active" not in st.session_state:
     st.session_state.exam_active = False
 if "exam_finished" not in st.session_state:
@@ -862,7 +879,15 @@ else:
                 st.error("Clave incorrecta.")
     else:
         st.success("Acceso concedido ✅")
-        subs = st.session_state.submissions
+        subs = shared_store["submissions"]
+
+        refresh_col1, refresh_col2 = st.columns([1, 5])
+        with refresh_col1:
+            if st.button("🔄 Actualizar"):
+                st.rerun()
+        with refresh_col2:
+            st.caption("Los resultados de todos los alumnos (cualquier celular/PC) llegan aquí en tiempo real. "
+                       "Usa 'Actualizar' si un alumno acaba de enviar y no ves su fila todavía.")
 
         if not subs:
             st.info("Todavía no hay entregas registradas en esta clase.")
@@ -910,6 +935,7 @@ else:
             st.markdown("---")
             confirm_reset = st.checkbox("Confirmo que deseo borrar todos los registros de esta clase.")
             if st.button("🗑️ Reiniciar / limpiar registros", disabled=not confirm_reset, use_container_width=True):
-                st.session_state.submissions = []
+                with shared_store["lock"]:
+                    shared_store["submissions"].clear()
                 st.success("Registros reiniciados.")
                 st.rerun()
