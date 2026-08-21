@@ -753,8 +753,9 @@ if app_mode == "Estudiante":
         if attempt < 2:
             st.warning(
                 f"✏️ Intento 1/2 (práctica) completado. Puntaje: **{result['Puntaje (0-10)']} / 10**. "
-                "Este resultado NO se envía a la teacher todavía. Repite los mismos ejercicios para "
-                "registrar tu resultado final."
+                "Este resultado NO se envía a la teacher todavía. Para no memorizar las respuestas, "
+                "el desglose (respuestas correctas y explicaciones) se muestra recién después del "
+                "intento 2/2. Repite los mismos ejercicios para registrar tu resultado final."
             )
         else:
             st.success(f"¡Enviado a la teacher! (Intento 2/2) Puntaje: **{result['Puntaje (0-10)']} / 10**")
@@ -764,13 +765,19 @@ if app_mode == "Estudiante":
         col2.metric("Correctas", result["Ejercicios correctos"])
         col3.metric("Tiempo empleado", result["Tiempo empleado"])
 
-        st.markdown("### 📝 Desglose pedagógico")
-        for i, d in enumerate(result["detalle"], start=1):
-            icon = "✅" if d["correcto"] else "❌"
-            with st.expander(f"{icon} Ejercicio {i}: {d['prompt'][:60]}..."):
-                st.write(f"**Tu respuesta:** {d['respuesta_alumno']}")
-                st.write(f"**Respuesta correcta:** {d['respuesta_correcta']}")
-                st.info(f"💡 Retroalimentación (A2 → B1): {d['explicacion']}")
+        # El desglose con respuestas correctas y explicaciones SOLO se revela
+        # después del intento 2/2, para que el intento 1 sea una práctica real
+        # y el estudiante no memorice las respuestas antes de repetir el examen.
+        if attempt >= 2:
+            st.markdown("### 📝 Desglose pedagógico")
+            for i, d in enumerate(result["detalle"], start=1):
+                icon = "✅" if d["correcto"] else "❌"
+                with st.expander(f"{icon} Ejercicio {i}: {d['prompt'][:60]}..."):
+                    st.write(f"**Tu respuesta:** {d['respuesta_alumno']}")
+                    st.write(f"**Respuesta correcta:** {d['respuesta_correcta']}")
+                    st.info(f"💡 Retroalimentación (A2 → B1): {d['explicacion']}")
+        else:
+            st.caption("🔒 El desglose de respuestas se desbloqueará al terminar el intento 2/2.")
 
         if attempt < 2:
             if st.button("🔁 Repetir estos mismos ejercicios (Intento 2/2 - se enviará a la teacher)",
