@@ -406,6 +406,9 @@ def render_listening(version, data):
     st.caption("Click Play to listen to the story. You can play it as many times as you need.")
     render_audio_player(data["audio_text"], f"listen_{version}")
 
+    st.markdown("**Audio script:**")
+    st.markdown(f"> {data['audio_text']}")
+
     st.markdown("#### A. Multiple Choice")
     mc_prefix = f"{version}_listen_mc_"
     for i, item in enumerate(data["mc"]):
